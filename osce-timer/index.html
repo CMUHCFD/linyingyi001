@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OSCE 站位計時器</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Roboto+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: one-screen exam-room instrument; station card on top, giant clock in the middle, two thumb-sized controls at the bottom */
+:root{
+  --bg:#eef3f3; --surface:#ffffff; --fg:#14262a; --muted:#5b6f73; --line:#d3dfe0;
+  --accent:#1f7a78; --accent-fg:#ffffff;
+  --warn:#c7820a; --warn-bg:#fff4dc;
+  --stop:#c62828; --stop-bg:#fde7e6;
+  --f-body:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --f-num:"Roboto Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1a1c; --surface:#172527; --fg:#e7f0f0; --muted:#93a8ab; --line:#29393c;
+  --accent:#3bb3ae; --accent-fg:#061414;
+  --warn:#f2b441; --warn-bg:#2d2412;
+  --stop:#ff6b62; --stop-bg:#3a1715; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#0f1a1c; --surface:#172527; --fg:#e7f0f0; --muted:#93a8ab; --line:#29393c;
+  --accent:#3bb3ae; --accent-fg:#061414;
+  --warn:#f2b441; --warn-bg:#2d2412;
+  --stop:#ff6b62; --stop-bg:#3a1715; color-scheme:dark }
+
+html,body{height:100%;margin:0}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:16px;
+  transition:background-color .3s}
+body.is-warn{background:var(--warn-bg)}
+body.is-stop{background:var(--stop-bg)}
+.app{height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:16px;
+  max-width:560px;margin:0 auto;
+  padding-block:16px 20px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+.station{background:var(--surface);border:1px solid var(--line);border-radius:14px;
+  padding:14px 16px;display:flex;align-items:center;gap:14px}
+.badge{flex:none;width:60px;height:60px;border-radius:12px;background:var(--accent);color:var(--accent-fg);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1}
+.badge small{font-size:11px;letter-spacing:.08em}
+.badge b{font-family:var(--f-num);font-size:28px;margin-top:2px}
+.info{min-width:0;flex:1}
+.info .topic{font-size:19px;font-weight:700;overflow-wrap:anywhere}
+.info .who{color:var(--muted);font-size:15px;margin-top:2px}
+.edit{flex:none;border:1px solid var(--line);background:transparent;color:var(--muted);
+  border-radius:10px;padding:8px 12px;font:inherit;font-size:14px;cursor:pointer}
+
+.clock{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:220px}
+.status{font-size:15px;font-weight:700;letter-spacing:.06em;padding:6px 14px;border-radius:999px;
+  background:var(--surface);border:1px solid var(--line);color:var(--muted)}
+.digits{font-family:var(--f-num);font-weight:700;font-variant-numeric:tabular-nums;
+  font-size:clamp(84px,27vw,170px);line-height:1;letter-spacing:-.02em;color:var(--fg)}
+.bar{width:100%;height:8px;border-radius:99px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;width:100%;background:var(--accent);transition:width .25s linear}
+.hint{color:var(--muted);font-size:14px;text-align:center}
+
+body.is-warn .digits{color:var(--warn)}
+body.is-warn .bar i{background:var(--warn)}
+body.is-warn .status{color:var(--warn);border-color:var(--warn)}
+body.is-stop .digits{color:var(--stop)}
+body.is-stop .status{color:#fff;background:var(--stop);border-color:var(--stop)}
+body.is-stop .bar i{background:var(--stop)}
+@media (prefers-reduced-motion:no-preference){
+  body.is-stop .digits{animation:pulse 1s ease-in-out infinite}
+}
+@keyframes pulse{50%{opacity:.45}}
+
+.controls{display:grid;grid-template-columns:2fr 1fr;gap:12px}
+.btn{font:inherit;font-size:22px;font-weight:700;border-radius:16px;padding:20px 0;cursor:pointer;
+  border:2px solid transparent}
+.btn-main{background:var(--accent);color:var(--accent-fg)}
+body.is-running .btn-main{background:var(--surface);color:var(--fg);border-color:var(--fg)}
+.btn-reset{background:var(--surface);color:var(--fg);border-color:var(--line)}
+.btn:focus-visible,.edit:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.btn:active{transform:translateY(1px)}
+
+/* settings sheet */
+.sheet{position:fixed;inset:0;background:rgba(10,20,22,.45);display:flex;align-items:flex-end;justify-content:center;z-index:20}
+.panel{background:var(--surface);color:var(--fg);width:100%;max-width:560px;box-sizing:border-box;
+  border-radius:18px 18px 0 0;display:flex;flex-direction:column;gap:14px;
+  padding-block:20px calc(20px + env(safe-area-inset-bottom,0px));
+  padding-left:max(18px,env(safe-area-inset-left,0px));padding-right:max(18px,env(safe-area-inset-right,0px))}
+.panel h2{margin:0;font-size:18px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+label{display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--muted);min-width:0}
+input{font:inherit;font-size:17px;color:var(--fg);background:var(--bg);border:1px solid var(--line);
+  border-radius:10px;padding:10px 12px;width:100%;box-sizing:border-box}
+.note{font-size:13px;color:var(--muted);margin:0}
+.panel .controls{grid-template-columns:1fr 1fr}
+.panel .btn{font-size:17px;padding:14px 0}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <section class="station" aria-label="站別資訊">
+    <div class="badge"><small>第</small><b id="vStation">3</b></div>
+    <div class="info">
+      <div class="topic" id="vTopic">腹部身體檢查</div>
+      <div class="who">學員：<span id="vStudent">學員 A</span>　每站 <span id="vMin">8</span> 分鐘</div>
+    </div>
+    <button class="edit" id="openSettings" type="button">設定</button>
+  </section>
+
+  <section class="clock" aria-live="polite">
+    <div class="status" id="status">準備開始</div>
+    <div class="digits" id="digits" role="timer">08:00</div>
+    <div class="bar"><i id="bar"></i></div>
+    <div class="hint" id="hint">剩 1 分鐘響鈴提醒，時間到轉紅並響長鈴</div>
+  </section>
+
+  <section class="controls">
+    <button class="btn btn-main" id="btnMain" type="button">開始</button>
+    <button class="btn btn-reset" id="btnReset" type="button">重設</button>
+  </section>
+</div>
+
+<div class="sheet" id="sheet" hidden>
+  <form class="panel" id="form">
+    <h2>本站設定</h2>
+    <div class="row">
+      <label>站別<input id="inStation" inputmode="numeric" value="3"></label>
+      <label>時間（分鐘）<input id="inMin" type="number" min="1" max="60" value="8"></label>
+    </div>
+    <label>考題<input id="inTopic" value="腹部身體檢查"></label>
+    <label>學員代號<input id="inStudent" value="學員 A"></label>
+    <p class="note">請填代號，不填真實姓名、學號或病歷號。</p>
+    <div class="controls">
+      <button class="btn btn-reset" type="button" id="cancel">取消</button>
+      <button class="btn btn-main" type="submit">套用</button>
+    </div>
+  </form>
+</div>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id)};
+  var cfg={station:"3",min:8,topic:"腹部身體檢查",student:"學員 A"};
+  try{var s=JSON.parse(localStorage.getItem("osce-cfg")||"null");if(s)cfg=Object.assign(cfg,s)}catch(e){}
+
+  var total, remain, endAt=0, running=false, tick=null, warned=false, ended=false, ctx=null, lock=null;
+
+  function render(){
+    $("vStation").textContent=cfg.station; $("vTopic").textContent=cfg.topic;
+    $("vStudent").textContent=cfg.student; $("vMin").textContent=cfg.min;
+  }
+  function fmt(ms){
+    var neg=ms<0, s=Math.ceil(Math.abs(ms)/1000);
+    if(neg) s=Math.floor(Math.abs(ms)/1000);
+    var m=Math.floor(s/60), r=s%60;
+    return (neg?"+":"")+String(m).padStart(2,"0")+":"+String(r).padStart(2,"0");
+  }
+  function setState(){
+    var b=document.body;
+    b.classList.toggle("is-running",running);
+    b.classList.toggle("is-warn",!ended && remain<=60000 && remain>0 && (running||remain<total));
+    b.classList.toggle("is-stop",ended);
+    var st=$("status");
+    if(ended){st.textContent="時間到";$("hint").textContent="已超時，數字顯示超出時間";}
+    else if(remain<=60000 && remain<total){st.textContent=running?"剩 1 分鐘":"已暫停";$("hint").textContent="請提醒學員準備結束";}
+    else if(running){st.textContent="計時中";$("hint").textContent="剩 1 分鐘響鈴提醒，時間到轉紅並響長鈴";}
+    else if(remain<total){st.textContent="已暫停";}
+    else{st.textContent="準備開始";$("hint").textContent="剩 1 分鐘響鈴提醒，時間到轉紅並響長鈴";}
+    $("btnMain").textContent=running?"暫停":(remain<total||ended?"繼續":"開始");
+  }
+  function draw(){
+    $("digits").textContent=fmt(remain);
+    $("bar").style.width=Math.max(0,Math.min(100,remain/total*100))+"%";
+  }
+  function beep(times,len,freq){
+    if(!ctx) return;
+    for(var i=0;i<times;i++){
+      var t=ctx.currentTime+i*(len+0.15), o=ctx.createOscillator(), g=ctx.createGain();
+      o.type="square"; o.frequency.value=freq; o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.35,t+0.02);
+      g.gain.setValueAtTime(0.35,t+len-0.05); g.gain.exponentialRampToValueAtTime(0.0001,t+len);
+      o.start(t); o.stop(t+len+0.02);
+    }
+    if(navigator.vibrate){try{navigator.vibrate(times>2?[300,150,300,150,600]:[200,100,200])}catch(e){}}
+  }
+  function step(){
+    remain=endAt-Date.now();
+    if(!warned && remain<=60000 && remain>0){warned=true;beep(2,0.25,880);}
+    if(!ended && remain<=0){ended=true;beep(3,0.6,660);}
+    draw(); setState();
+  }
+  function start(){
+    if(!ctx){try{ctx=new (window.AudioContext||window.webkitAudioContext)()}catch(e){}}
+    if(ctx&&ctx.state==="suspended") ctx.resume();
+    endAt=Date.now()+remain; running=true;
+    tick=setInterval(step,200); step();
+    if(navigator.wakeLock){navigator.wakeLock.request("screen").then(function(l){lock=l}).catch(function(){})}
+  }
+  function pause(){
+    running=false; clearInterval(tick); remain=endAt-Date.now(); draw(); setState();
+    if(lock){lock.release().catch(function(){});lock=null}
+  }
+  function reset(){
+    if(running) pause();
+    total=cfg.min*60000; remain=total; warned=false; ended=false; draw(); setState();
+  }
+
+  $("btnMain").addEventListener("click",function(){running?pause():start()});
+  $("btnReset").addEventListener("click",reset);
+  $("openSettings").addEventListener("click",function(){
+    $("inStation").value=cfg.station;$("inMin").value=cfg.min;$("inTopic").value=cfg.topic;$("inStudent").value=cfg.student;
+    $("sheet").hidden=false;
+  });
+  $("cancel").addEventListener("click",function(){$("sheet").hidden=true});
+  $("sheet").addEventListener("click",function(e){if(e.target===this)this.hidden=true});
+  $("form").addEventListener("submit",function(e){
+    e.preventDefault();
+    var m=parseInt($("inMin").value,10); if(!(m>=1&&m<=60)) m=8;
+    cfg={station:$("inStation").value.trim()||"1",min:m,
+         topic:$("inTopic").value.trim()||"未命名考題",student:$("inStudent").value.trim()||"學員 A"};
+    try{localStorage.setItem("osce-cfg",JSON.stringify(cfg))}catch(e){}
+    render(); reset(); $("sheet").hidden=true;
+  });
+  document.addEventListener("visibilitychange",function(){
+    if(document.visibilityState==="visible"&&running&&navigator.wakeLock){
+      navigator.wakeLock.request("screen").then(function(l){lock=l}).catch(function(){});
+    }
+  });
+
+  render(); reset();
+})();
+</script>
+</body>
+</html>
